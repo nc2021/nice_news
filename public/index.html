@@ -3,30 +3,52 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Nice News</title>
+    <title>Good News Feed</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="container">
       <header>
-        <h1>Nice News</h1>
-        <p>Search for uplifting news stories.</p>
-        <form id="search-form">
-          <input
-            type="text"
-            id="query"
-            name="q"
-            placeholder="Try 'good news'"
-            aria-label="Search query"
-            required
-          />
-          <button type="submit">Search</button>
+        <div>
+          <p class="eyebrow">Curated positivity</p>
+          <h1>Good News Feed</h1>
+          <p>Pick a mode, optionally add keywords, and refresh for fresh uplifting stories.</p>
+        </div>
+        <form id="search-form" class="controls" aria-label="News search controls">
+          <label class="field">
+            <span>Mode</span>
+            <select id="mode" name="mode">
+              <option value="good">good</option>
+              <option value="breakthrough">breakthrough</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Keywords (optional)</span>
+            <input
+              type="text"
+              id="query"
+              name="q"
+              placeholder="Add topics to narrow results"
+              aria-label="Keyword query"
+            />
+          </label>
+          <button type="submit" id="refresh">Refresh</button>
         </form>
       </header>
 
       <section id="status" role="status" aria-live="polite"></section>
 
-      <ul id="results" class="news-list"></ul>
+      <section aria-label="News results">
+        <div id="results" class="news-list" aria-live="polite"></div>
+      </section>
+
+      <section aria-label="Recent searches">
+        <div class="section-header">
+          <h2>Recent searches</h2>
+          <p class="muted">Latest queries from this feed</p>
+        </div>
+        <ul id="history" class="history-list"></ul>
+      </section>
     </main>
 
     <script src="app.js"></script>
