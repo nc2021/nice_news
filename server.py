@@ -52,6 +52,23 @@ def log_search(db_path: Path, query: str) -> None:
         )
 
 
+def get_search_history(db_path: Path, limit: int) -> List[MutableMapping[str, str]]:
+    """Return the most recent search queries."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT query, created_at
+            FROM search_log
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [{"query": row["query"], "created_at": row["created_at"]} for row in rows]
+
+
 def fetch_news(query: str, api_key: str) -> List[MutableMapping[str, str]]:
     """Retrieve news items from SerpApi using DuckDuckGo News engine."""
     params = {
@@ -100,6 +117,10 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
             self.handle_news_api()
             return
 
+        if self.path.startswith("/api/history"):
+            self.handle_history_api()
+            return
+
         if self.path == "/":
             self.path = "/index.html"
 
@@ -143,6 +164,23 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def handle_history_api(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+
+        limit_param = params.get("limit", ["20"])[0]
+        try:
+            limit = max(1, int(limit_param))
+        except ValueError:
+            self.send_json(
+                {"error": "Invalid limit", "limit": limit_param},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        history = get_search_history(DB_PATH, limit)
+        self.send_json({"history": history, "limit": limit}, status=HTTPStatus.OK)
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         super().log_message(format, *args)
