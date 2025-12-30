@@ -30,7 +30,6 @@ HOST, PORT = "localhost", 8000
 
 def init_db(db_path: Path) -> None:
     """Ensure the SQLite database and ``search_log`` table exist."""
-
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -45,7 +44,6 @@ def init_db(db_path: Path) -> None:
 
 def log_search(db_path: Path, query: str) -> None:
     """Insert a search query into the log table."""
-
     timestamp = datetime.datetime.utcnow().isoformat() + "Z"
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -55,8 +53,7 @@ def log_search(db_path: Path, query: str) -> None:
 
 
 def fetch_news(query: str, api_key: str) -> List[MutableMapping[str, str]]:
-    """Retrieve news items from SerpApi using the Google News engine."""
-
+    """Retrieve news items from SerpApi using DuckDuckGo News engine."""
     params = {
         "engine": "duckduckgo_news",
         "q": query,
@@ -82,6 +79,8 @@ def fetch_news(query: str, api_key: str) -> List[MutableMapping[str, str]]:
                 "source": result.get("source", ""),
                 "date": result.get("date", ""),
                 "snippet": result.get("snippet", ""),
+                # Optional: include thumbnail if you want it later:
+                # "thumbnail": result.get("thumbnail", ""),
             }
         )
 
@@ -94,7 +93,7 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(PUBLIC_DIR), **kwargs)
 
-    def do_GET(self) -> None:  # noqa: N802 - matching base signature
+    def do_GET(self) -> None:  # noqa: N802
         if self.path.startswith("/api/news"):
             self.handle_news_api()
             return
@@ -105,7 +104,7 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def handle_news_api(self) -> None:
-         parsed = urllib.parse.urlparse(self.path)
+        parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
 
         mode = (params.get("mode", ["good"])[0] or "good").strip().lower()
@@ -125,21 +124,10 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
             return
 
         try:
-            items, log_url = fetch_news(query, api_key)
-            top_title = items[0]["title"] if items else None
-            log_search(
-                DB_PATH,
-                mode=mode,
-                query=query,
-                serpapi_url=log_url,  # redacted (no api_key)
-                result_count=len(items),
-                top_title=top_title,
-            )
-            self.send_json(
-                {"query": query, "mode": mode, "items": items},
-                status=HTTPStatus.OK,
-            )
-        except Exception as exc:  # broad for a small local server
+            items = fetch_news(query, api_key)
+            log_search(DB_PATH, query)
+            self.send_json({"query": query, "mode": mode, "items": items}, status=HTTPStatus.OK)
+        except Exception as exc:  # pylint: disable=broad-except
             self.send_json(
                 {"error": "Upstream fetch failed.", "details": str(exc), "query": query, "mode": mode},
                 status=HTTPStatus.BAD_GATEWAY,
@@ -153,7 +141,7 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format: str, *args) -> None:  # noqa: A003 - inherited name
+    def log_message(self, format: str, *args) -> None:  # noqa: A003
         super().log_message(format, *args)
 
 
