@@ -58,8 +58,11 @@ def fetch_news(query: str, api_key: str) -> List[MutableMapping[str, str]]:
     """Retrieve news items from SerpApi using the Google News engine."""
 
     params = {
-        "engine": "google_news",
+        "engine": "duckduckgo_news",
         "q": query,
+        "kl": "us-en",
+        "df": "d",
+        "safe": "1",
         "api_key": api_key,
     }
     encoded_params = urllib.parse.urlencode(params)
@@ -102,25 +105,43 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def handle_news_api(self) -> None:
-        parsed = urllib.parse.urlparse(self.path)
+         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
-        query = params.get("q", ["good news"])[0]
+
+        mode = (params.get("mode", ["good"])[0] or "good").strip().lower()
+        q_param = (params.get("q", [""])[0] or "").strip()
+
+        if q_param:
+            query = q_param
+        else:
+            query = "breakthrough news" if mode == "breakthrough" else "good news today"
 
         api_key = os.getenv("SERPAPI_KEY")
         if not api_key:
             self.send_json(
-                {"error": "SERPAPI_KEY is missing.", "query": query},
+                {"error": "SERPAPI_KEY is missing.", "query": query, "mode": mode},
                 status=HTTPStatus.INTERNAL_SERVER_ERROR,
             )
             return
 
         try:
-            items = fetch_news(query, api_key)
-            log_search(DB_PATH, query)
-            self.send_json({"query": query, "items": items}, status=HTTPStatus.OK)
-        except Exception as exc:  # pylint: disable=broad-except
+            items, log_url = fetch_news(query, api_key)
+            top_title = items[0]["title"] if items else None
+            log_search(
+                DB_PATH,
+                mode=mode,
+                query=query,
+                serpapi_url=log_url,  # redacted (no api_key)
+                result_count=len(items),
+                top_title=top_title,
+            )
             self.send_json(
-                {"error": str(exc), "query": query},
+                {"query": query, "mode": mode, "items": items},
+                status=HTTPStatus.OK,
+            )
+        except Exception as exc:  # broad for a small local server
+            self.send_json(
+                {"error": "Upstream fetch failed.", "details": str(exc), "query": query, "mode": mode},
                 status=HTTPStatus.BAD_GATEWAY,
             )
 
