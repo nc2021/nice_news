@@ -72,17 +72,19 @@ def fetch_news(query: str, api_key: str) -> List[MutableMapping[str, str]]:
 
     items: List[MutableMapping[str, str]] = []
     for result in results:
-        items.append(
-            {
-                "title": result.get("title", ""),
-                "link": result.get("link", ""),
-                "source": result.get("source", ""),
-                "date": result.get("date", ""),
-                "snippet": result.get("snippet", ""),
-                # Optional: include thumbnail if you want it later:
-                # "thumbnail": result.get("thumbnail", ""),
-            }
-        )
+        item: MutableMapping[str, str] = {
+            "title": result.get("title", ""),
+            "link": result.get("link", ""),
+            "snippet": result.get("snippet", ""),
+            "source": result.get("source", ""),
+            "date": result.get("date", ""),
+        }
+
+        thumbnail = result.get("thumbnail")
+        if thumbnail:
+            item["thumbnail"] = thumbnail
+
+        items.append(item)
 
     return items
 
@@ -107,7 +109,8 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
 
-        mode = (params.get("mode", ["good"])[0] or "good").strip().lower()
+        mode_param = (params.get("mode", ["good"])[0] or "good").strip().lower()
+        mode = mode_param if mode_param in {"good", "breakthrough"} else "good"
         q_param = (params.get("q", [""])[0] or "").strip()
 
         if q_param:
@@ -118,7 +121,7 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
         api_key = os.getenv("SERPAPI_KEY")
         if not api_key:
             self.send_json(
-                {"error": "SERPAPI_KEY is missing.", "query": query, "mode": mode},
+                {"error": "SERPAPI_KEY is missing", "query": query, "mode": mode},
                 status=HTTPStatus.INTERNAL_SERVER_ERROR,
             )
             return
@@ -129,7 +132,7 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
             self.send_json({"query": query, "mode": mode, "items": items}, status=HTTPStatus.OK)
         except Exception as exc:  # pylint: disable=broad-except
             self.send_json(
-                {"error": "Upstream fetch failed.", "details": str(exc), "query": query, "mode": mode},
+                {"error": "Upstream fetch failed", "details": str(exc), "query": query, "mode": mode},
                 status=HTTPStatus.BAD_GATEWAY,
             )
 
