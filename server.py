@@ -15,6 +15,7 @@ import os
 import sqlite3
 import urllib.parse
 import urllib.request
+import time
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
@@ -27,9 +28,10 @@ PUBLIC_DIR = ROOT_DIR / "public"
 DB_PATH = ROOT_DIR / "data.db"
 HOST, PORT = "localhost", 8000
 
+CACHE_TTL_SECONDS = 30 * 60  # 30 minutes
 
 def init_db(db_path: Path) -> None:
-    """Ensure the SQLite database and ``search_log`` table exist."""
+    """Ensure the SQLite database and tables exist."""
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -41,6 +43,17 @@ def init_db(db_path: Path) -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS news_cache (
+                cache_key TEXT PRIMARY KEY,
+                fetched_at INTEGER NOT NULL,
+                items_json TEXT NOT NULL
+            )
+            """
+        )
+
+
 
 def log_search(db_path: Path, query: str) -> None:
     """Insert a search query into the log table."""
@@ -49,6 +62,41 @@ def log_search(db_path: Path, query: str) -> None:
         conn.execute(
             "INSERT INTO search_log (query, created_at) VALUES (?, ?)",
             (query, timestamp),
+        )
+
+def make_cache_key(mode: str, query: str) -> str:
+    return f"{mode}::{query.strip().lower()}"
+
+def get_cached_items(db_path: Path, cache_key: str) -> List[MutableMapping[str, str]] | None:
+    now = int(time.time())
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT fetched_at, items_json FROM news_cache WHERE cache_key = ?",
+            (cache_key,),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    fetched_at, items_json = row
+    if now - int(fetched_at) > CACHE_TTL_SECONDS:
+        return None
+
+    return json.loads(items_json)
+
+def set_cached_items(db_path: Path, cache_key: str, items: List[MutableMapping[str, str]]) -> None:
+    now = int(time.time())
+    items_json = json.dumps(items)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO news_cache (cache_key, fetched_at, items_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(cache_key) DO UPDATE SET
+              fetched_at = excluded.fetched_at,
+              items_json = excluded.items_json
+            """,
+            (cache_key, now, items_json),
         )
 
 
@@ -148,14 +196,31 @@ class NewsRequestHandler(SimpleHTTPRequestHandler):
             return
 
         try:
+            cache_key = make_cache_key(mode, query)
+
+            cached_items = get_cached_items(DB_PATH, cache_key)
+            if cached_items is not None:
+                log_search(DB_PATH, query)
+                self.send_json(
+                    {"query": query, "mode": mode, "items": cached_items, "cached": True},
+                    status=HTTPStatus.OK,
+                )
+                return
+
             items = fetch_news(query, api_key)
+            set_cached_items(DB_PATH, cache_key, items)
+
             log_search(DB_PATH, query)
-            self.send_json({"query": query, "mode": mode, "items": items}, status=HTTPStatus.OK)
+            self.send_json(
+                {"query": query, "mode": mode, "items": items, "cached": False},
+                status=HTTPStatus.OK,
+            )
         except Exception as exc:  # pylint: disable=broad-except
             self.send_json(
                 {"error": "Upstream fetch failed", "details": str(exc), "query": query, "mode": mode},
                 status=HTTPStatus.BAD_GATEWAY,
             )
+
 
     def send_json(self, payload: MutableMapping[str, object], *, status: HTTPStatus) -> None:
         body = json.dumps(payload).encode("utf-8")
